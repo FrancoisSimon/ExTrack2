@@ -128,6 +128,8 @@ def sim_FOV(nb_tracks=10000,
             nb_dims = 2,
             initial_fractions = np.array([0.6,0.4]),
             TrMat = np.array([[0.9,0.1],[0.1,0.9]]),
+            gammas = np.array([0.0, 0.02]),
+            betas = np.array([0.1, 0.1]),
             LocErr_std = 0,
             dt = 0.02,
             pBL = 0.1, 
@@ -155,7 +157,7 @@ def sim_FOV(nb_tracks=10000,
         if LocErr.shape == ():
             LocErr = LocErr[None]
     
-    nb_sub_steps = 20
+    nb_sub_steps = 5
     nb_strobo_frames = 1
     nb_states = len(TrMat)
     sub_dt = dt/nb_sub_steps
@@ -173,20 +175,57 @@ def sim_FOV(nb_tracks=10000,
     states = markovian_process(TrSubMat, initial_fractions, nb_tracks, (max_track_len) * nb_sub_steps)
     cell_dims0 = np.copy(cell_dims)
     cell_dims0[cell_dims0==None] = 1
-    
+     
     for state in states:
-
+        
         cur_track_len = max_track_len
         positions = np.zeros(((max_track_len) * nb_sub_steps, 3))
         positions[0,:] = 2*np.random.rand(3)*cell_dims0-cell_dims0
         positions[1:] = np.random.normal(0, 1, ((max_track_len) * nb_sub_steps - 1, 3))* np.sqrt(2*Ds*sub_dt)[state[:-1, None]]
         state = state[np.arange(0,(max_track_len-1) * nb_sub_steps +1, nb_sub_steps)]
-        positions = np.cumsum(positions, 0)
-        positions = positions.reshape((max_track_len, nb_sub_steps, 3))
-        positions = positions[:,:nb_strobo_frames]
-        positions = np.mean(positions,axis = 1)
         
-        inFOV =  is_in_FOV(positions, cell_dims)
+        strobo_positions = np.cumsum(positions, 0)
+        strobo_positions = strobo_positions.reshape((max_track_len, nb_sub_steps, 3))
+        strobo_diff = np.mean(strobo_positions[:,:nb_strobo_frames],axis = 1) - strobo_positions[:,0]
+
+        positions = positions.reshape((max_track_len, nb_sub_steps, 3))
+        positions = np.sum(positions,axis = 1)
+
+        track = np.zeros(positions.shape)
+        track[0] = positions[0]
+        
+        if np.any(gammas != 0):
+            cur_seg_len = 0
+            for k in range(1,len(track)):
+                if state[k] == state[k-1]:
+                    cur_seg_len += 1
+                else:
+                    cur_seg_len = 0
+
+                if cur_seg_len==0:
+                    track[k] = track[k-1] + positions[k]
+                elif cur_seg_len == 1:
+                    if gammas[state[k]] > 0:
+                        disp = (np.random.rand(3) - 0.5)
+                        norm = np.sum(disp[:nb_dims]**2, axis = 0)**0.5
+                        track[k] = track[k-1] + 1.5*gammas[state[k]] * (disp / norm) #1.5 to try to consider the displacement to start at the middle of the step.
+                    else:
+                        track[k] = track[k-1] + positions[k]
+                elif cur_seg_len >= 2:
+                    beta_weights = np.exp(-betas[state[k]] * np.arange(cur_seg_len-1))[::-1]
+                    beta_weights = beta_weights / np.sum(beta_weights)
+                    disps = track[k - cur_seg_len+1:k] - track[k - cur_seg_len :k-1]
+                    disps = np.sum(disps * beta_weights[:,None], 0)
+                    norms = np.sum(disps[:nb_dims]**2, axis = 0)**0.5
+                    if norms>0:
+                        track[k] = track[k-1] + gammas[state[k]] * (disps / norms) + positions[k]
+                    else:
+                        track[k] = track[k-1] + positions[k]
+            positions = track + strobo_diff
+        else:
+            positions = np.cumsum(positions, 0)
+        
+        inFOV = is_in_FOV(positions, cell_dims)
         inFOV = np.concatenate((inFOV,[False]))
         while np.any(inFOV):
             if inFOV[0] == False:
