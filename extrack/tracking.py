@@ -6,12 +6,6 @@ Created on Mon Apr  4 13:23:30 2022
 @author: francois
 """
 
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Apr  1 11:28:38 2022
-@author: Franc
-"""
-
 import numpy as np
 
 GPU_computing = False
