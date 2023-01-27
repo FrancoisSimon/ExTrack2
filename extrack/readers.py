@@ -103,7 +103,7 @@ def read_table(paths, # path of the file to read or list of paths to read multip
                dist_th = np.inf, # maximum distance allowed for consecutive positions 
                frames_boundaries = [-np.inf, np.inf], # min and max frame values allowed for peak detection
                fmt = 'csv', # format of the document to be red, 'csv' or 'pkl', one can also just specify a separator e.g. ' '. 
-               colnames = ['POSITION_X', 'POSITION_Y', 'FRAME', ['TRACK_ID', 'Var1']], 
+               colnames = ['POSITION_X', 'POSITION_Y', 'FRAME', 'TRACK_ID'],  # if multiple columns are required to identify a track, the string used to identify the track ID can be replaced by a list of strings represening the column names e.g. ['TRACK_ID', 'Movie_ID']
                opt_colnames = [], # list of additional metrics to collect e.g. ['QUALITY', 'ID']
                remove_no_disp = True):
     
