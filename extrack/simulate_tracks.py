@@ -74,7 +74,7 @@ def sim_noBias(track_lengths = [7,8,9,10,11], # create arrays of tracks of speci
     
     if initial_fractions is None:
         initial_fractions = get_fractions_from_TrMat(TrMat)
-        
+    
     nb_states = len(TrMat)
     sub_dt = dt/nb_sub_steps
     
@@ -95,7 +95,7 @@ def sim_noBias(track_lengths = [7,8,9,10,11], # create arrays of tracks of speci
         # determines displacements then MSDs from stats
         positions = np.random.normal(0, 1, (nb_tracks, (track_len-1) * nb_sub_steps+1, nb_dims)) * np.sqrt(2*Ds*sub_dt)[states[:,:, None]]
         positions = np.cumsum(positions, 1)
-
+        
         positions = positions + np.random.normal(0, LocErr, (nb_tracks, (track_len-1) * nb_sub_steps + 1, nb_dims))
         
         all_Css.append(positions[:,np.arange(0,(track_len-1) * nb_sub_steps +1, nb_sub_steps)])
@@ -107,7 +107,7 @@ def sim_noBias(track_lengths = [7,8,9,10,11], # create arrays of tracks of speci
         l = str(Cs.shape[1])
         all_Css_dict[l] = Cs
         all_Bss_dict[l] = Bs
-        
+    
     return all_Css_dict, all_Bss_dict
 
 def is_in_FOV(positions, cell_dims):
@@ -124,16 +124,16 @@ def sim_FOV(nb_tracks=10000,
             max_track_len=40,
             min_track_len = 2,
             LocErr=0.02, # localization error in x, y and z (even if not used)
-            Ds = np.array([0,0.05]),
+            Ds = np.array([0,0.000005]),
             nb_dims = 2,
             initial_fractions = np.array([0.6,0.4]),
             TrMat = np.array([[0.9,0.1],[0.1,0.9]]),
-            gammas = np.array([0.0, 0.02]),
+            gammas = np.array([0.0, 0.1]),
             betas = np.array([0.1, 0.1]),
             LocErr_std = 0,
             dt = 0.02,
-            pBL = 0.1, 
-            cell_dims = [0.5,None,None]): # dimension limits in x, y and z respectively
+            pBL = 0.0001, 
+            cell_dims = [1000,None,None]): # dimension limits in x, y and z respectively
     '''
     simulate tracks able to come and leave from the field of view :
     
@@ -151,7 +151,7 @@ def sim_FOV(nb_tracks=10000,
     all_tracks: dict describing the tracks with track length as keys (number of time positions, e.g. '23') of 3D arrays: dim 0 = track, dim 1 = time position, dim 2 = x, y position.
     all_Bs: dict descibing the true states of tracks with track length as keys (number of time positions, e.g. '23') of 3D arrays: dim 0 = track, dim 1 = time position, dim 2 = x, y position.    
     '''
-
+    
     if type(LocErr) != np.ndarray:
         LocErr = np.array(LocErr)
         if LocErr.shape == ():
@@ -175,55 +175,53 @@ def sim_FOV(nb_tracks=10000,
     states = markovian_process(TrSubMat, initial_fractions, nb_tracks, (max_track_len) * nb_sub_steps)
     cell_dims0 = np.copy(cell_dims)
     cell_dims0[cell_dims0==None] = 1
-     
-    for state in states:
+    
+    for substate in states:
         
         cur_track_len = max_track_len
         positions = np.zeros(((max_track_len) * nb_sub_steps, 3))
         positions[0,:] = 2*np.random.rand(3)*cell_dims0-cell_dims0
-        positions[1:] = np.random.normal(0, 1, ((max_track_len) * nb_sub_steps - 1, 3))* np.sqrt(2*Ds*sub_dt)[state[:-1, None]]
-        state = state[np.arange(0,(max_track_len-1) * nb_sub_steps +1, nb_sub_steps)]
+        positions[1:] = np.random.normal(0, 1, ((max_track_len) * nb_sub_steps - 1, 3))* np.sqrt(2*Ds*sub_dt)[substate[:-1, None]]
+        state = substate[np.arange(0,(max_track_len-1) * nb_sub_steps +1, nb_sub_steps)]
         
         strobo_positions = np.cumsum(positions, 0)
         strobo_positions = strobo_positions.reshape((max_track_len, nb_sub_steps, 3))
         strobo_diff = np.mean(strobo_positions[:,:nb_strobo_frames],axis = 1) - strobo_positions[:,0]
-
-        positions = positions.reshape((max_track_len, nb_sub_steps, 3))
-        positions = np.sum(positions,axis = 1)
-
+        
+        #positions = positions.reshape((max_track_len, nb_sub_steps, 3))
+        #positions = np.sum(positions,axis = 1)
+        
         track = np.zeros(positions.shape)
         track[0] = positions[0]
         
-        if np.any(gammas != 0):
-            cur_seg_len = 0
-            for k in range(1,len(track)):
-                if state[k] == state[k-1]:
-                    cur_seg_len += 1
+        cur_seg_len = 0
+        for k in range(1,len(track)):
+            if substate[k] == substate[k-1]:
+                cur_seg_len += 1
+            else:
+                cur_seg_len = 0
+            
+            if cur_seg_len==0:
+                track[k] = track[k-1] + positions[k]
+            elif cur_seg_len == 1:
+                if gammas[substate[k]] > 0:
+                    disp = (np.random.rand(3) - 0.5)
+                    norm = np.sum(disp[:nb_dims]**2, axis = 0)**0.5
+                    track[k] = track[k-1] + (gammas[substate[k]] / nb_sub_steps) * (disp / norm) #1.5 to try to consider the displacement to start at the middle of the step.
                 else:
-                    cur_seg_len = 0
-
-                if cur_seg_len==0:
                     track[k] = track[k-1] + positions[k]
-                elif cur_seg_len == 1:
-                    if gammas[state[k]] > 0:
-                        disp = (np.random.rand(3) - 0.5)
-                        norm = np.sum(disp[:nb_dims]**2, axis = 0)**0.5
-                        track[k] = track[k-1] + 1.5*gammas[state[k]] * (disp / norm) #1.5 to try to consider the displacement to start at the middle of the step.
-                    else:
-                        track[k] = track[k-1] + positions[k]
-                elif cur_seg_len >= 2:
-                    beta_weights = np.exp(-betas[state[k]] * np.arange(cur_seg_len-1))[::-1]
-                    beta_weights = beta_weights / np.sum(beta_weights)
-                    disps = track[k - cur_seg_len+1:k] - track[k - cur_seg_len :k-1]
-                    disps = np.sum(disps * beta_weights[:,None], 0)
-                    norms = np.sum(disps[:nb_dims]**2, axis = 0)**0.5
-                    if norms>0:
-                        track[k] = track[k-1] + gammas[state[k]] * (disps / norms) + positions[k]
-                    else:
-                        track[k] = track[k-1] + positions[k]
-            positions = track + strobo_diff
-        else:
-            positions = np.cumsum(positions, 0)
+            elif cur_seg_len >= 2:
+                track[k] = track[k-1] + positions[k]
+                beta_weights = np.exp(-betas[substate[k]] * np.arange(cur_seg_len-1))[::-1]
+                beta_weights = beta_weights / np.sum(beta_weights)
+                disps = track[k - cur_seg_len+1:k] - track[k - cur_seg_len :k-1]
+                disps = np.sum(disps * beta_weights[:,None], 0)
+                norms = np.sum(disps[:nb_dims]**2, axis = 0)**0.5
+                if norms>0:
+                    track[k] = track[k] + (gammas[substate[k]] / nb_sub_steps) * (disps / norms) 
+        #positions = track + strobo_diff
+        
+        positions = track[np.arange(0,(max_track_len-1) * nb_sub_steps +1, nb_sub_steps)] + strobo_diff
         
         inFOV = is_in_FOV(positions, cell_dims)
         inFOV = np.concatenate((inFOV,[False]))
@@ -232,7 +230,7 @@ def sim_FOV(nb_tracks=10000,
                 positions = positions[np.argmax(inFOV):]
                 state = state[np.argmax(inFOV):]
                 inFOV = inFOV[np.argmax(inFOV):]
-
+            
             cur_sub_track = positions[:np.argmin(inFOV)]
             cur_sub_state = state[:np.argmin(inFOV)]
             
@@ -249,14 +247,14 @@ def sim_FOV(nb_tracks=10000,
             cur_real_pos = np.copy(cur_sub_track)
             cur_sub_track = cur_sub_track + cur_sub_errors
             #cur_sub_track = cur_sub_track + np.random.normal(0, std_spurious, (len(cur_sub_track), 3)) * (np.random.rand(len(cur_sub_track),1)<p_spurious)
-    
+            
             arg_add = np.argwhere(np.arange(min_track_len,max_track_len+1)==len(cur_sub_track))
             
             for a in arg_add:
                 all_Css[a[0]] = all_Css[a[0]] + [cur_sub_track[:,:nb_dims]]
                 all_Bss[a[0]] = all_Bss[a[0]] + [cur_sub_state]
                 all_sigs[a[0]] = all_sigs[a[0]] + [cur_sub_sigmas[:,:nb_dims]]
-
+            
             positions = positions[np.argmin(inFOV):]
             state = state[np.argmin(inFOV):]
             inFOV = inFOV[np.argmin(inFOV):]
@@ -279,5 +277,7 @@ def sim_FOV(nb_tracks=10000,
             all_Css_dict[l] = Cs
             all_Bss_dict[l] = Bs    
             all_sigs_dict[l] = sigs
-
+    
     return all_Css_dict, all_Bss_dict, all_sigs_dict
+
+
